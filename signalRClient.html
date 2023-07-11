@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>SignalR JavaScript Client</title>
+    </head>
+    <body>
+        <h1>SignalR JavaScript Client</h1>
+        <p id="stateLabel">Ready to connect</p>
+        <p id="connIDLabel">ConnID: N/a</p>
+        <div>
+            <label for="connectionUrl">SignalR Server Url: </label>
+            <input id="connectionUrl" />
+            <button id="connectButton" type="submit">Connect</button>
+            <button id="closeButton" disabled>Close Socket</button>           
+        </div>
+        <p></p>
+        <div>
+            <p id="roomInfoLabel">Room: N/a</p>
+            <label for="roomLabel">Room: </label>
+            <input id="roomLabel" />
+            <button id="roomButton" type="submit">Connect</button>
+        </div>
+        <p></p>
+        <div>
+            <p id="tokenInfoLabel">Token Info: N/a</p>
+            <label for="tokenLabel">Token: </label>
+            <input id="tokenLabel" />
+            <button id="tokenButton" type="submit">Set Token</button>
+        </div>
+        <p></p>
+        <div>
+            <label for="sendMessage">Message:</label>
+            <input id="sendMessage" disabled />
+            <button id="sendButton" type="submit" disabled>Send</button>
+        </div>
+        <div>
+            <label for="recipents">Recipents ID: </label>
+            <input id="recipents" disabled />
+        </div>
+        <p></p>
+        <p></p>
+        <div>
+            <button id="pingButton" type="submit">Ping</button>
+        </div>
+        <p></p>
+        <h2>Communication Log</h2>
+        <table style="width: 800px;">
+        <thead>
+            <tr>
+                <td style="width: 100px;">From</td>
+                <td style="width: 100px;">To</td>
+                <td>Data</td>
+            </tr>
+        </thead>
+        <tbody id="commsLog"></tbody>
+        </table>
+        <p></p>
+    </body>
+    
+    <script src="lib/signalr/dist/browser/signalr.js"></script>
+    <script>
+        var connectionUrl = document.getElementById("connectionUrl")
+        var connectButton = document.getElementById("connectButton");
+        var stateLabel = document.getElementById("stateLabel");
+        var sendMessage = document.getElementById("sendMessage");
+        var sendButton = document.getElementById("sendButton");
+        var commsLog = document.getElementById("commsLog");
+        var closeButton = document.getElementById("closeButton");
+        var recipents = document.getElementById("recipents");
+        var connID = document.getElementById("connIDLabel");
+        var roomButton = document.getElementById("roomButton");
+        var roomInfoLabel = document.getElementById("roomInfoLabel");
+        var tokenInfoLabel = document.getElementById("tokenInfoLabel"); //tokenButton
+        var tokenButton = document.getElementById("tokenButton");
+        var tokenLabel = document.getElementById("tokenLabel");
+        var pingButton = document.getElementById("pingButton");
+
+        // connectionUrl.value = "https://localhost:7068/chatHub";
+        connectionUrl.value = "https://api-workspace.m2w.vn/chathub";
+        // connectionUrl.value = "https://workspace-o.vercel.app/chathub";
+       
+       
+        const hubConnection = new signalR.HubConnectionBuilder()
+            .withUrl(connectionUrl.value, { 
+                headers: { "Foo": "Bar" },
+                skipNegotiation: true,
+    transport: signalR.HttpTransportType.WebSockets, accessTokenFactory: () => tokenLabel.value}) //headers: {"Authorization": "Bearer " + tokenLabel.value}
+            // .withHubProtocol(new signalR.protocols.msgpack.MessagePackHubProtocol())
+            .configureLogging(signalR.LogLevel.Information)
+            .withAutomaticReconnect()
+            .build();
+
+        connectButton.onclick = function(){
+            stateLabel.innerHTML = "Attempting to connect ...";
+            connectionUrl.value = connectionUrl.value ; //+ "?access_token=" + tokenLabel.value
+            
+            hubConnection.start().then(function () {
+                updateState();
+
+                commsLog.innerHTML += '<tr>' +
+                    '<td colspan="3" class="cmmslog-data">Connection opened</td>' +
+                    '</tr>';
+            });
+        };
+
+        closeButton.onclick = function(){
+            if(!hubConnection || hubConnection.state !== "Connected")
+            {
+                alert("Hub not connected!");
+            }
+
+            hubConnection.stop().then(function () {
+                console.debug("Request stop on hub");
+            });
+        };
+
+        hubConnection.onclose(function(event) {
+            updateState();
+            commsLog.innerHTML += '<tr>' +
+                    '<td colspan="3" class="cmmslog-data">Connection Stopped.</td>' +
+                    '</tr>';
+            alert("error: " + event);
+        });
+
+        sendButton.onclick = function (){
+            var message = constructJSONPayload();
+            var t0 = {
+                Uuid: '1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed',
+                Message: message,
+                GroupName: roomLabel.value,
+                TimeSend: new Date(),
+            };
+            console.log(t0);
+            hubConnection.invoke("SendMessageToGroupAsync", {uuid: '149a1d87-1bba-41ff-96b2-88b7c2706a2e-khanh', Message: sendMessage.value, GroupName: recipents.value, TimeSend: 1688108714833});
+            commsLog.innerHTML += '<tr>' +
+                    '<td class="commslog-client">Client</td>' +
+                    '<td class="commslog-server">Server</td>' + 
+                    '<td class="commslog-data">'+ htmlEscape(message) +'</td></tr>';
+        }
+
+        roomButton.onclick = function ()
+        {
+            var message = JSON.stringify({
+                "GroupName" : roomLabel.value,
+                "ConnectionId" : connID.innerHTML.substring(8, connID.innerHTML.length),
+            });
+            
+            console.log(message);
+
+            hubConnection.invoke("JoinRoomAsync", roomLabel.value);
+        }
+
+        pingButton.onclick = function ()
+        {
+            
+
+            hubConnection.invoke("PingAsync");
+        }
+
+        tokenButton.onclick = function(){
+            tokenInfoLabel.innerHTML = "Token: " + tokenLabel.value;
+        }
+
+        hubConnection.on("ReceiveRoomName", function(roomname) {
+
+            roomInfoLabel.innerHTML = "Room: " + roomname;
+            commsLog.innerHTML += '<tr>' +
+                    '<td colspan="3" class="cmmslog-data">Room Name Received from Hub</td>' +
+                    '</tr>';
+        })
+
+        hubConnection.on("Viewers", function(total, users) {
+            // console.log(total);
+            // console.log(users);
+        })
+
+        hubConnection.on("ViewerChange", function(change, user) {
+            // console.log(change);
+            // console.log(user);
+        })
+
+        hubConnection.on("ReceiveConnID", function(connid) {
+            connID.innerHTML = "ConnID: " + connid;
+            commsLog.innerHTML += '<tr>' +
+                    '<td colspan="3" class="cmmslog-data">Connection ID Received from Hub</td>' +
+                    '</tr>';
+        })
+
+        hubConnection.on("ReceiveMessage", function (message){
+            commsLog.innerHTML += '<tr>' +
+                    '<td class="commslog-client">Client</td>' +
+                    '<td class="commslog-server">Server</td>' + 
+                    '<td class="commslog-data">'+ htmlEscape(message) +'</td></tr>';
+        });
+
+        hubConnection.on("ReceiveMessagePing", function (message){
+            commsLog.innerHTML += '<tr>' +
+                    '<td class="commslog-client">Client</td>' +
+                    '<td class="commslog-server">Server</td>' + 
+                    '<td class="commslog-data">'+ htmlEscape(message) +'</td></tr>';
+        });
+
+        function htmlEscape(str) {
+            return str.toString()
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        }
+
+        function constructJSONPayload()
+        {
+            return JSON.stringify({
+                "From" : connID.innerHTML.substring(8, connID.innerHTML.length),
+                "To" : recipents.value,
+                "Message" : sendMessage.value,
+            });
+        }
+
+        function updateState() {
+            function disable() {
+                sendMessage.disabled = true;
+                sendButton.disabled = true;
+                closeButton.disabled = true;
+                recipents.disabled = true;
+            }
+            function enable() {
+                sendMessage.disabled = false;
+                sendButton.disabled = false;
+                closeButton.disabled = false;
+                recipents.disabled = false;
+            }
+            connectionUrl.disabled = true;
+            connectButton.disabled = true;
+            if (!hubConnection) {
+                disable();
+            } else {
+                switch (hubConnection.state) {
+                    case "Disconnected":
+                        stateLabel.innerHTML = "Closed";
+                        connID.innerHTML = "ConnID: N/a";
+                        disable();
+                        connectionUrl.disabled = false;
+                        connectButton.disabled = false;
+                        break;
+                    case "Connecting":
+                        stateLabel.innerHTML = "Connecting...";
+                        disable();
+                        break;
+                    case "Connected":
+                        stateLabel.innerHTML = "Connected";
+                        enable();
+                        break;
+                    default:
+                        stateLabel.innerHTML = "Unknown WebSoc State - unknown";
+                        disable();
+                        break;
+                }
+            }
+        };
+    </script>
+</html>
